@@ -227,7 +227,7 @@ def normalize_string_quotes(s: str) -> str:
                 # Do not introduce backslashes in interpolated expressions
                 return s
 
-    if new_quote == '"""' and new_body[-1:] == '"':
+    if new_quote == '"""' and new_body[-2:] == '\\"':
         # edge case:
         new_body = new_body[:-1] + '\\"'
     orig_escape_count = body.count("\\")
