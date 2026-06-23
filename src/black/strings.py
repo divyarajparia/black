@@ -387,7 +387,7 @@ def count_chars_in_width(line_str: str, max_width: int) -> int:
     total_width = 0
     for i, char in enumerate(line_str):
         width = char_width(char)
-        if width + total_width > max_width:
+        if width + total_width >= max_width:
             return i
         total_width += width
     return len(line_str)
