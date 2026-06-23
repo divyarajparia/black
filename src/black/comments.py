@@ -32,7 +32,7 @@ FMT_ON: Final = {"# fmt: on", "# fmt:on", "# yapf: enable"}
 # (excludes except_clause and case_block which aren't standalone compound statements)
 _COMPOUND_STATEMENTS: Final = STATEMENT - {syms.except_clause, syms.case_block}
 
-COMMENT_EXCEPTIONS = " !:#'"
+COMMENT_EXCEPTIONS = " !#'"
 _COMMENT_PREFIX = "# "
 _COMMENT_LIST_SEPARATOR = ";"
 
