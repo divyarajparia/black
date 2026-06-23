@@ -1,8 +1,8 @@
 """Caching of formatted files with feature-based invalidation."""
 
 import hashlib
+import json
 import os
-import pickle
 import sys
 import tempfile
 from collections.abc import Iterable
@@ -49,7 +49,7 @@ CACHE_DIR = get_cache_dir()
 
 
 def get_cache_file(mode: Mode) -> Path:
-    return CACHE_DIR / f"cache.{mode.get_cache_key()}.pickle"
+    return CACHE_DIR / f"cache.{mode.get_cache_key()}.json"
 
 
 @dataclass
@@ -75,11 +75,11 @@ class Cache:
         if not exists:
             return cls(mode, cache_file)
 
-        with cache_file.open("rb") as fobj:
+        with cache_file.open("r", encoding="utf-8") as fobj:
             try:
-                data: dict[str, tuple[float, int, str]] = pickle.load(fobj)
+                data: dict[str, list[object]] = json.load(fobj)
                 file_data = {k: FileData(*v) for k, v in data.items()}
-            except (pickle.UnpicklingError, ValueError, IndexError):
+            except (json.JSONDecodeError, ValueError, IndexError, TypeError):
                 return cls(mode, cache_file)
 
         return cls(mode, cache_file, file_data)
@@ -138,13 +138,16 @@ class Cache:
         try:
             CACHE_DIR.mkdir(parents=True, exist_ok=True)
             with tempfile.NamedTemporaryFile(
-                dir=str(self.cache_file.parent), delete=False
+                dir=str(self.cache_file.parent),
+                delete=False,
+                mode="w",
+                encoding="utf-8",
             ) as f:
-                # We store raw tuples in the cache because it's faster.
-                data: dict[str, tuple[float, int, str]] = {
-                    k: (*v,) for k, v in self.file_data.items()
+                # We store raw lists in the cache for JSON compatibility.
+                data: dict[str, list[object]] = {
+                    k: list(v) for k, v in self.file_data.items()
                 }
-                pickle.dump(data, f, protocol=4)
+                json.dump(data, f)
             os.replace(f.name, self.cache_file)
         except OSError:
             pass
