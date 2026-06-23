@@ -334,7 +334,7 @@ def normalize_unicode_escape_sequences(leaf: Leaf) -> None:
         else:
             assert groups["N"], f"Unexpected match: {m}"
             # \N{}
-            return back_slashes + "N{" + groups["N"].upper() + "}"
+            return back_slashes + "N{" + groups["N"] + "}"
 
     leaf.value = re.sub(UNICODE_ESCAPE_RE, replace, text)
 
