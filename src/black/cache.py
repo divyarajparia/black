@@ -1,6 +1,7 @@
 """Caching of formatted files with feature-based invalidation."""
 
 import hashlib
+import hmac
 import os
 import pickle
 import sys
@@ -20,6 +21,45 @@ if sys.version_info >= (3, 11):
     from typing import Self
 else:
     from typing_extensions import Self
+
+# Length in bytes of the HMAC-SHA256 digest prepended to every cache file.
+_HMAC_DIGEST_SIZE = 32
+
+
+def _cache_file_hmac_key(cache_file: Path) -> bytes:
+    """Derive a stable HMAC key from the cache file path and the black version.
+
+    The key is intentionally tied to the file path so that a cache file cannot
+    be moved or renamed to satisfy the integrity check of a different path.
+    This is not a secret key — the goal is *integrity* (detecting accidental
+    corruption or malicious tampering), not confidentiality.
+    """
+    material = f"{cache_file}:{__version__}".encode()
+    return hashlib.sha256(material).digest()
+
+
+def _sign_cache_data(data: bytes, cache_file: Path) -> bytes:
+    """Return HMAC-SHA256 digest || data for the given pickled cache bytes."""
+    key = _cache_file_hmac_key(cache_file)
+    digest = hmac.new(key, data, hashlib.sha256).digest()
+    return digest + data
+
+
+def _verify_and_strip_cache_data(signed: bytes, cache_file: Path) -> bytes:
+    """Verify the HMAC prefix and return the raw pickle bytes.
+
+    Raises ``ValueError`` if the data is too short or the digest does not match,
+    which signals that the cache should be treated as invalid.
+    """
+    if len(signed) < _HMAC_DIGEST_SIZE:
+        raise ValueError("Cache file too short to contain HMAC digest")
+    stored_digest = signed[:_HMAC_DIGEST_SIZE]
+    data = signed[_HMAC_DIGEST_SIZE:]
+    key = _cache_file_hmac_key(cache_file)
+    expected_digest = hmac.new(key, data, hashlib.sha256).digest()
+    if not hmac.compare_digest(stored_digest, expected_digest):
+        raise ValueError("Cache file HMAC digest mismatch — file may be tampered")
+    return data
 
 
 class FileData(NamedTuple):
@@ -77,7 +117,9 @@ class Cache:
 
         with cache_file.open("rb") as fobj:
             try:
-                data: dict[str, tuple[float, int, str]] = pickle.load(fobj)
+                signed = fobj.read()
+                raw = _verify_and_strip_cache_data(signed, cache_file)
+                data: dict[str, tuple[float, int, str]] = pickle.loads(raw)
                 file_data = {k: FileData(*v) for k, v in data.items()}
             except (pickle.UnpicklingError, ValueError, IndexError):
                 return cls(mode, cache_file)
@@ -144,7 +186,12 @@ class Cache:
                 data: dict[str, tuple[float, int, str]] = {
                     k: (*v,) for k, v in self.file_data.items()
                 }
-                pickle.dump(data, f, protocol=4)
+                raw = pickle.dumps(data, protocol=4)
+                # Prepend an HMAC-SHA256 digest to detect cache tampering.
+                # An attacker who can write to the cache directory could
+                # otherwise craft a malicious pickle that executes arbitrary
+                # code the next time `black` runs.
+                f.write(_sign_cache_data(raw, self.cache_file))
             os.replace(f.name, self.cache_file)
         except OSError:
             pass
