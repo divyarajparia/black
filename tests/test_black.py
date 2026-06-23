@@ -812,6 +812,73 @@ class BlackTestCase(BlackBaseTestCase):
             output = str(report)
         self.assertEqual(output, unstyle(output))
 
+    def test_report_statistics_basic(self) -> None:
+        """done_with_stats() records FileStats and print_statistics() emits output."""
+        report = Report(statistics=True)
+        out_lines: list[str] = []
+
+        def capturing_out(msg: str | None = None, **kwargs: Any) -> None:
+            if msg is not None:
+                out_lines.append(msg)
+
+        # A file with no changes should not appear in the stats table.
+        report.done(Path("unchanged.py"), black.Changed.NO)
+        self.assertEqual(report._file_stats, {})
+
+        # A file with changes should be recorded.
+        report.done_with_stats(
+            Path("changed.py"), black.Changed.YES, src_lines=100, dst_lines=95
+        )
+        self.assertIn(Path("changed.py"), report._file_stats)
+        stats = report._file_stats[Path("changed.py")]
+        self.assertEqual(stats.src_lines, 100)
+        self.assertEqual(stats.dst_lines, 95)
+        self.assertEqual(stats.lines_changed, 5)
+        self.assertEqual(stats.net_change, -5)
+
+        # A second changed file to verify multi-file table output.
+        report.done_with_stats(
+            Path("other.py"), black.Changed.YES, src_lines=50, dst_lines=60
+        )
+
+        # print_statistics() should produce non-empty output.
+        with patch("black.output._out", capturing_out):
+            report.print_statistics()
+
+        full_output = "\n".join(out_lines)
+        self.assertIn("changed.py", full_output)
+        self.assertIn("other.py", full_output)
+        # Net change for changed.py is -5 (lines removed).
+        self.assertIn("-5", full_output)
+        # Net change for other.py is +10 (lines added).
+        self.assertIn("+10", full_output)
+        # The totals row should mention "2 files".
+        self.assertIn("2 files", full_output)
+
+    def test_report_statistics_empty(self) -> None:
+        """print_statistics() does nothing when no files were changed."""
+        report = Report(statistics=True)
+        out_lines: list[str] = []
+
+        def capturing_out(msg: str | None = None, **kwargs: Any) -> None:
+            if msg is not None:
+                out_lines.append(msg)
+
+        report.done(Path("unchanged.py"), black.Changed.NO)
+
+        with patch("black.output._out", capturing_out):
+            report.print_statistics()
+
+        self.assertEqual(out_lines, [])
+
+    def test_report_statistics_disabled_by_default(self) -> None:
+        """Report.statistics is False by default; _file_stats stays empty."""
+        report = Report()
+        self.assertFalse(report.statistics)
+        # done() (not done_with_stats) must not populate _file_stats.
+        report.done(Path("f.py"), black.Changed.YES)
+        self.assertEqual(report._file_stats, {})
+
     def test_lib2to3_parse(self) -> None:
         with self.assertRaises(black.InvalidInput):
             black.lib2to3_parse("invalid syntax")

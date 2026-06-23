@@ -20,7 +20,7 @@ from typing import Any
 
 from mypy_extensions import mypyc_attr
 
-from black import WriteBack, format_file_in_place
+from black import WriteBack, format_file_contents, format_file_in_place
 from black.cache import Cache
 from black.mode import Mode
 from black.output import err
@@ -167,6 +167,20 @@ async def schedule_formatting(
     if not sources:
         return
 
+    # When --statistics is requested, snapshot each source file's line count
+    # before we hand it off to the worker processes.  This must be done on the
+    # main process because the worker processes may rewrite the files before we
+    # get a chance to read them.
+    pre_format_line_counts: dict[Path, int] = {}
+    if report.statistics:
+        for src in sources:
+            try:
+                pre_format_line_counts[src] = src.read_text(
+                    encoding="utf-8", errors="replace"
+                ).count("\n")
+            except OSError:
+                pass
+
     cancelled = []
     sources_to_cache = []
     lock = None
@@ -211,7 +225,41 @@ async def schedule_formatting(
                         write_back is WriteBack.CHECK and changed is Changed.NO
                     ):
                         sources_to_cache.append(src)
-                    report.done(src, changed)
+
+                    # Record per-file line stats when --statistics is active.
+                    if (
+                        report.statistics
+                        and changed is Changed.YES
+                        and src in pre_format_line_counts
+                    ):
+                        src_line_count = pre_format_line_counts[src]
+                        if write_back is WriteBack.YES:
+                            # File was written back; re-read from disk.
+                            try:
+                                dst_line_count = src.read_text(
+                                    encoding="utf-8", errors="replace"
+                                ).count("\n")
+                            except OSError:
+                                dst_line_count = src_line_count
+                        else:
+                            # check/diff mode: file unchanged on disk; derive count
+                            # from the formatter directly.
+                            try:
+                                src_text = src.read_text(
+                                    encoding="utf-8", errors="replace"
+                                )
+                                formatted = format_file_contents(
+                                    src_text, fast=fast, mode=mode
+                                )
+                                dst_line_count = formatted.count("\n")
+                            except Exception:
+                                dst_line_count = src_line_count
+                        report.done_with_stats(
+                            src, changed, src_line_count, dst_line_count
+                        )
+                    else:
+                        report.done(src, changed)
+
         if cancelled:
             await asyncio.gather(*cancelled, return_exceptions=True)
         if sources_to_cache and not no_cache and cache is not None:
