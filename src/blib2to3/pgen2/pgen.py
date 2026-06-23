@@ -1,6 +1,7 @@
 # Copyright 2004-2005 Elemental Security, Inc. All Rights Reserved.
 # Licensed to PSF under a Contributor Agreement.
 
+import ast
 import os
 from collections.abc import Iterator, Sequence
 from typing import IO, Any, NoReturn, Union
@@ -97,7 +98,7 @@ class ParserGenerator:
         else:
             # Either a keyword or an operator
             assert label[0] in ('"', "'"), label
-            value = eval(label)
+            value = ast.literal_eval(label)
             if value[0].isalpha():
                 if label[0] == '"':
                     keywords = c.soft_keywords
