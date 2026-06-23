@@ -540,6 +540,17 @@ def validate_regex(
         " included files."
     ),
 )
+@click.option(
+    "--statistics",
+    is_flag=True,
+    help=(
+        "Emit a detailed per-file table of line-count changes to stderr after"
+        " formatting.  For each file that was reformatted, the table shows the"
+        " number of lines before and after formatting and the net change.  Files"
+        " are sorted by absolute line impact (most-changed first).  This flag has"
+        " no effect when no files are changed."
+    ),
+)
 @click.pass_context
 def main(
     ctx: click.Context,
@@ -572,6 +583,7 @@ def main(
     src: tuple[str, ...],
     config: str | None,
     no_cache: bool,
+    statistics: bool,
 ) -> None:
     """The uncompromising code formatter."""
     ctx.ensure_object(dict)
@@ -695,7 +707,9 @@ def main(
         # You can still pass -v to get verbose output.
         quiet = True
 
-    report = Report(check=check, diff=diff, quiet=quiet, verbose=verbose)
+    report = Report(
+        check=check, diff=diff, quiet=quiet, verbose=verbose, statistics=statistics
+    )
 
     if code is not None:
         reformat_code(
@@ -756,6 +770,9 @@ def main(
                 workers=workers,
                 no_cache=no_cache,
             )
+
+    if report.statistics:
+        report.print_statistics()
 
     if verbose or not quiet:
         if code is None and (verbose or report.change_count or report.failure_count):
@@ -942,6 +959,18 @@ def reformat_one(
             ):
                 if not cache.is_changed(src):
                     changed = Changed.CACHED
+
+            # Capture line counts for --statistics.  We read the raw source
+            # before formatting so we can compare against the result.
+            src_contents_for_stats: str | None = None
+            if report.statistics and changed is not Changed.CACHED:
+                try:
+                    src_contents_for_stats = src.read_text(
+                        encoding="utf-8", errors="replace"
+                    )
+                except OSError:
+                    pass
+
             if changed is not Changed.CACHED and format_file_in_place(
                 src, fast=fast, write_back=write_back, mode=mode, lines=lines
             ):
@@ -951,6 +980,37 @@ def reformat_one(
                 or (write_back is WriteBack.CHECK and changed is Changed.NO)
             ):
                 cache.write([src])
+
+            # Record per-file line stats when --statistics is active.
+            if (
+                report.statistics
+                and changed is Changed.YES
+                and src_contents_for_stats is not None
+            ):
+                src_line_count = src_contents_for_stats.count("\n")
+                # For write-back modes the file has been updated on disk; re-read
+                # to get the formatted line count.  For check/diff modes the file
+                # is unchanged on disk so we derive the count from the formatter.
+                if write_back is WriteBack.YES:
+                    try:
+                        dst_line_count = src.read_text(
+                            encoding="utf-8", errors="replace"
+                        ).count("\n")
+                    except OSError:
+                        dst_line_count = src_line_count
+                else:
+                    try:
+                        formatted = format_file_contents(
+                            src_contents_for_stats, fast=fast, mode=mode, lines=lines
+                        )
+                        dst_line_count = formatted.count("\n")
+                    except Exception:
+                        dst_line_count = src_line_count
+                report.done_with_stats(src, changed, src_line_count, dst_line_count)
+                # done_with_stats already calls done() internally; return early
+                # so the plain report.done() at the bottom is not called again.
+                return
+
         report.done(src, changed)
     except Exception as exc:
         if report.verbose:
