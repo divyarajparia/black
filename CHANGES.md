@@ -90,6 +90,12 @@
 
 <!-- Changes to Black's terminal output and error messages -->
 
+- Add `--statistics` flag that prints a per-file table of line-count changes to
+  stderr after formatting.  For each reformatted file the table shows the line count
+  before and after formatting and the net change; files are sorted by absolute
+  line impact (most-changed first).  A summary totals row is always included.
+  The flag has no effect when no files are reformatted (#XXXX)
+
 ### _Blackd_
 
 <!-- Changes to blackd -->
