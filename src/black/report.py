@@ -2,9 +2,11 @@
 Summarize Black runs to users.
 """
 
-from dataclasses import dataclass
+import json
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
+from typing import IO, Any
 
 from black.output import err, out, style_output
 
@@ -30,6 +32,11 @@ class Report:
     change_count: int = 0
     same_count: int = 0
     failure_count: int = 0
+    # When set, per-file results are accumulated and a JSON report is written here.
+    json_report_file: IO[str] | None = field(default=None, repr=False, compare=False)
+    _file_results: list[dict[str, Any]] = field(
+        default_factory=list, init=False, repr=False, compare=False
+    )
 
     def done(self, src: Path, changed: Changed) -> None:
         """Increment the counter for successful reformatting. Write out a message."""
@@ -38,6 +45,7 @@ class Report:
             if self.verbose or not self.quiet:
                 out(f"{reformatted} {src}")
             self.change_count += 1
+            status = "reformatted"
         else:
             if self.verbose:
                 if changed is Changed.NO:
@@ -46,11 +54,51 @@ class Report:
                     msg = f"{src} wasn't modified on disk since last run."
                 out(msg, bold=False)
             self.same_count += 1
+            status = "unchanged" if changed is Changed.NO else "cached"
+
+        if self.json_report_file is not None:
+            self._file_results.append({"src": str(src), "status": status})
 
     def failed(self, src: Path, message: str) -> None:
         """Increment the counter for failed reformatting. Write out a message."""
         err(f"error: cannot format {src}: {message}")
         self.failure_count += 1
+        if self.json_report_file is not None:
+            self._file_results.append(
+                {"src": str(src), "status": "failed", "error": message}
+            )
+
+    def write_json_report(self) -> None:
+        """Serialize results to JSON and write them to ``json_report_file``.
+
+        The report has the following structure::
+
+            {
+                "summary": {
+                    "reformatted": <int>,
+                    "unchanged": <int>,
+                    "failed": <int>
+                },
+                "files": [
+                    {"src": "<path>", "status": "reformatted" | "unchanged" | "cached" | "failed", "error": "<msg>"},
+                    ...
+                ]
+            }
+
+        Call this method after all files have been processed.
+        """
+        if self.json_report_file is None:
+            return
+        payload: dict[str, Any] = {
+            "summary": {
+                "reformatted": self.change_count,
+                "unchanged": self.same_count,
+                "failed": self.failure_count,
+            },
+            "files": self._file_results,
+        }
+        json.dump(payload, self.json_report_file, indent=2)
+        self.json_report_file.write("\n")
 
     def path_ignored(self, path: Path, message: str) -> None:
         if self.verbose:

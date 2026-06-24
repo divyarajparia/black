@@ -540,6 +540,22 @@ def validate_regex(
         " included files."
     ),
 )
+@click.option(
+    "--json-report",
+    type=click.Path(
+        file_okay=True,
+        dir_okay=False,
+        writable=True,
+        allow_dash=True,
+    ),
+    default=None,
+    help=(
+        "Write a JSON report of the formatting results to the given file path."
+        " Use '-' to write to stdout. The report contains a 'summary' key with"
+        " counts of reformatted, unchanged, and failed files, and a 'files' key"
+        " with per-file status entries."
+    ),
+)
 @click.pass_context
 def main(
     ctx: click.Context,
@@ -572,6 +588,7 @@ def main(
     src: tuple[str, ...],
     config: str | None,
     no_cache: bool,
+    json_report: str | None,
 ) -> None:
     """The uncompromising code formatter."""
     ctx.ensure_object(dict)
@@ -695,7 +712,20 @@ def main(
         # You can still pass -v to get verbose output.
         quiet = True
 
-    report = Report(check=check, diff=diff, quiet=quiet, verbose=verbose)
+    _json_report_fh = None
+    if json_report is not None:
+        if json_report == "-":
+            import sys as _sys
+            _json_report_fh = _sys.stdout
+        else:
+            _json_report_fh = open(json_report, "w", encoding="utf-8")  # noqa: WPS515
+    report = Report(
+        check=check,
+        diff=diff,
+        quiet=quiet,
+        verbose=verbose,
+        json_report_file=_json_report_fh,
+    )
 
     if code is not None:
         reformat_code(
@@ -763,6 +793,9 @@ def main(
         out(error_msg if report.return_code else "All done! ✨ 🍰 ✨")
         if code is None:
             click.echo(str(report), err=True)
+    report.write_json_report()
+    if _json_report_fh is not None and json_report != "-":
+        _json_report_fh.close()
     ctx.exit(report.return_code)
 
 
