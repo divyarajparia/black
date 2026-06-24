@@ -155,7 +155,7 @@ def normalize_string_prefix(s: str) -> str:
     )
 
     # Python syntax guarantees max 2 prefixes and that one of them is "r"
-    if len(new_prefix) == 2 and new_prefix[0].lower() != "r":
+    if new_prefix[0].lower() != "r" and len(new_prefix) == 2:
         new_prefix = new_prefix[::-1]
     return f"{new_prefix}{match.group(2)}"
 
