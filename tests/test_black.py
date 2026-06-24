@@ -812,6 +812,80 @@ class BlackTestCase(BlackBaseTestCase):
             output = str(report)
         self.assertEqual(output, unstyle(output))
 
+    def test_json_report(self) -> None:
+        """Test that Report.write_json_report() emits correct JSON."""
+        import io
+        import json as json_module
+
+        buf = io.StringIO()
+        report = Report(json_report_file=buf)
+
+        def _noop_out(msg: str, **kwargs: Any) -> None:
+            pass
+
+        def _noop_err(msg: str, **kwargs: Any) -> None:
+            pass
+
+        with patch("black.output._out", _noop_out), patch(
+            "black.output._err", _noop_err
+        ):
+            report.done(Path("a.py"), black.Changed.YES)
+            report.done(Path("b.py"), black.Changed.NO)
+            report.done(Path("c.py"), black.Changed.CACHED)
+            report.failed(Path("d.py"), "syntax error")
+
+        report.write_json_report()
+        data = json_module.loads(buf.getvalue())
+
+        self.assertEqual(data["summary"]["reformatted"], 1)
+        self.assertEqual(data["summary"]["unchanged"], 2)
+        self.assertEqual(data["summary"]["failed"], 1)
+        self.assertEqual(len(data["files"]), 4)
+
+        statuses = {entry["src"]: entry["status"] for entry in data["files"]}
+        self.assertEqual(statuses["a.py"], "reformatted")
+        self.assertEqual(statuses["b.py"], "unchanged")
+        self.assertEqual(statuses["c.py"], "cached")
+        self.assertEqual(statuses["d.py"], "failed")
+
+        failed_entry = next(e for e in data["files"] if e["src"] == "d.py")
+        self.assertIn("error", failed_entry)
+        self.assertEqual(failed_entry["error"], "syntax error")
+
+    def test_json_report_cli(self) -> None:
+        """Test the --json-report CLI flag writes a JSON file."""
+        import json as json_module
+        import tempfile
+
+        source = "x=1\n"
+        with tempfile.NamedTemporaryFile(
+            suffix=".py", mode="w", delete=False, encoding="utf-8"
+        ) as f:
+            f.write(source)
+            tmp_path = f.name
+
+        with tempfile.NamedTemporaryFile(
+            suffix=".json", delete=False
+        ) as report_f:
+            report_path = report_f.name
+
+        try:
+            result = BlackRunner().invoke(
+                black.main, [tmp_path, "--json-report", report_path]
+            )
+            with open(report_path, encoding="utf-8") as rf:
+                data = json_module.load(rf)
+            self.assertIn("summary", data)
+            self.assertIn("files", data)
+            self.assertIn("reformatted", data["summary"])
+            self.assertIn("unchanged", data["summary"])
+            self.assertIn("failed", data["summary"])
+            self.assertGreater(len(data["files"]), 0)
+        finally:
+            import os as _os
+            _os.unlink(tmp_path)
+            _os.unlink(report_path)
+
     def test_lib2to3_parse(self) -> None:
         with self.assertRaises(black.InvalidInput):
             black.lib2to3_parse("invalid syntax")
