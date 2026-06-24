@@ -2,9 +2,12 @@
 Summarize Black runs to users.
 """
 
-from dataclasses import dataclass
+import json
+import time
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
+from typing import Any
 
 from black.output import err, out, style_output
 
@@ -30,6 +33,11 @@ class Report:
     change_count: int = 0
     same_count: int = 0
     failure_count: int = 0
+    # Internal tracking for --json-summary: lists of file paths per outcome
+    _reformatted_files: list[str] = field(default_factory=list, repr=False)
+    _unchanged_files: list[str] = field(default_factory=list, repr=False)
+    _failed_files: list[str] = field(default_factory=list, repr=False)
+    _start_time: float = field(default_factory=time.monotonic, repr=False)
 
     def done(self, src: Path, changed: Changed) -> None:
         """Increment the counter for successful reformatting. Write out a message."""
@@ -38,6 +46,7 @@ class Report:
             if self.verbose or not self.quiet:
                 out(f"{reformatted} {src}")
             self.change_count += 1
+            self._reformatted_files.append(str(src))
         else:
             if self.verbose:
                 if changed is Changed.NO:
@@ -46,11 +55,13 @@ class Report:
                     msg = f"{src} wasn't modified on disk since last run."
                 out(msg, bold=False)
             self.same_count += 1
+            self._unchanged_files.append(str(src))
 
     def failed(self, src: Path, message: str) -> None:
         """Increment the counter for failed reformatting. Write out a message."""
         err(f"error: cannot format {src}: {message}")
         self.failure_count += 1
+        self._failed_files.append(str(src))
 
     def path_ignored(self, path: Path, message: str) -> None:
         if self.verbose:
@@ -74,6 +85,34 @@ class Report:
             return 1
 
         return 0
+
+    def to_json(self, *, indent: int | None = 2) -> str:
+        """Return a JSON string summarising this formatting run.
+
+        The JSON object contains:
+          - ``reformatted``: number of files that were (or would be) reformatted
+          - ``unchanged``: number of files that were already well formatted
+          - ``failed``: number of files that could not be formatted
+          - ``total``: sum of the three counts above
+          - ``duration_seconds``: elapsed wall-clock time since this Report was created
+          - ``reformatted_files``: list of file paths that were reformatted
+          - ``unchanged_files``: list of file paths that were left unchanged
+          - ``failed_files``: list of file paths that failed to reformat
+          - ``return_code``: the exit code Black would use for this run
+        """
+        elapsed = time.monotonic() - self._start_time
+        data: dict[str, Any] = {
+            "reformatted": self.change_count,
+            "unchanged": self.same_count,
+            "failed": self.failure_count,
+            "total": self.change_count + self.same_count + self.failure_count,
+            "duration_seconds": round(elapsed, 4),
+            "reformatted_files": self._reformatted_files,
+            "unchanged_files": self._unchanged_files,
+            "failed_files": self._failed_files,
+            "return_code": self.return_code,
+        }
+        return json.dumps(data, indent=indent)
 
     def __str__(self) -> str:
         """Render a color report of the current state.
