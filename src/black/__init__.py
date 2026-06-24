@@ -540,6 +540,16 @@ def validate_regex(
         " included files."
     ),
 )
+@click.option(
+    "--json-summary",
+    is_flag=True,
+    help=(
+        "Output a JSON object to stdout at the end of the run summarising the"
+        " number of reformatted, unchanged, and failed files, elapsed time, and"
+        " the list of affected file paths. Useful for CI pipelines and tooling"
+        " integrations that need to consume Black's results programmatically."
+    ),
+)
 @click.pass_context
 def main(
     ctx: click.Context,
@@ -572,6 +582,7 @@ def main(
     src: tuple[str, ...],
     config: str | None,
     no_cache: bool,
+    json_summary: bool,
 ) -> None:
     """The uncompromising code formatter."""
     ctx.ensure_object(dict)
@@ -763,6 +774,8 @@ def main(
         out(error_msg if report.return_code else "All done! ✨ 🍰 ✨")
         if code is None:
             click.echo(str(report), err=True)
+    if json_summary:
+        click.echo(report.to_json())
     ctx.exit(report.return_code)
 
 
