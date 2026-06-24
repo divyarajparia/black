@@ -370,7 +370,8 @@ class Node(Base):
         after = self.children[i + 1] if i + 1 < len(self.children) else None
         prev_map[id(child)] = before
         next_map[id(child)] = after
-        next_map[id(before)] = child
+        if before is not None:
+            next_map[id(before)] = child
         if after is not None:
             prev_map[id(after)] = child
 
@@ -385,7 +386,8 @@ class Node(Base):
             return
         before = prev_map.pop(id(child))
         after = next_map.pop(id(child))
-        next_map[id(before)] = after
+        if before is not None:
+            next_map[id(before)] = after
         if after is not None:
             prev_map[id(after)] = before
 
@@ -402,7 +404,8 @@ class Node(Base):
         after = next_map.pop(id(old))
         prev_map[id(child)] = before
         next_map[id(child)] = after
-        next_map[id(before)] = child
+        if before is not None:
+            next_map[id(before)] = child
         if after is not None:
             prev_map[id(after)] = child
 
